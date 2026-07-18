@@ -56,12 +56,15 @@ PDF text layer (PyMuPDF + tables)
 
 Không có Gemini key: vẫn extract text layer; trang scan sẽ trống (cảnh báo trong `warnings`).
 
-## Chạy server + UI họp
+## Chạy server (API-only)
+
+Repo **không kèm UI web** — dùng Swagger hoặc gọi HTTP/CLI.
 
 ```bash
 source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8090
-# Mở http://127.0.0.1:8090
+# Health:  http://127.0.0.1:8090/health
+# Swagger: http://127.0.0.1:8090/docs
 ```
 
 ## CLI

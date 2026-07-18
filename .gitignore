@@ -13,3 +13,7 @@ backups/
 *.bak.*
 .DS_Store
 .grok/
+
+# UI removed from this repo (API-only)
+web/
+hackathon-ui/

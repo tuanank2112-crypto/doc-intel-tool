@@ -10,12 +10,11 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .config import ROOT, UPLOADS, settings
+from .config import UPLOADS, settings
 from .llm import llm_enabled
 from .pipeline import analyze_paths
 from .qa import ask_job
@@ -31,12 +30,10 @@ app = FastAPI(
         "Tool AI-callable cho hồ sơ cơ quan nhà nước VN: Luật, Bộ luật, Nghị định, "
         "Thông tư, Quyết định, Chỉ thị, Công văn, Tờ trình, Đề án… "
         "Tóm tắt có cấu trúc, gắn cờ Điều–Khoản–thuật ngữ, gợi ý VB liên quan, "
-        "hỏi đáp họp kèm trích dẫn trang/điều."
+        "hỏi đáp họp kèm trích dẫn trang/điều. (API-only — không kèm UI web.)"
     ),
     version=__version__,
 )
-
-WEB = ROOT / "web"
 
 # CORS: local demo only — override via CORS_ORIGINS env (comma-separated)
 _cors = (getattr(settings, "cors_origins", None) or "http://127.0.0.1:8090,http://localhost:8090").split(",")
@@ -48,8 +45,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
-if WEB.exists():
-    app.mount("/static", StaticFiles(directory=str(WEB)), name="static")
 
 
 # --- Limits (Notion review) ---
@@ -124,29 +119,23 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/")
-@app.get("/tro-ly-hop-ubnd-v2.html")
-def index() -> FileResponse:
-    for name in ("tro-ly-hop-ubnd-v2.html", "index.html"):
-        index_path = WEB / name
-        if index_path.exists():
-            return FileResponse(index_path)
-    raise _public_error(404, "ui_not_found")
-
-
-@app.get("/test.png")
-def asset_test_png() -> FileResponse:
-    p = WEB / "test.png"
-    if not p.exists():
-        raise _public_error(404, "not_found")
-    return FileResponse(p)
-
-
-@app.get("/Emblem_of_Vietnam.svg.webp")
-def asset_emblem() -> FileResponse:
-    p = WEB / "Emblem_of_Vietnam.svg.webp"
-    if not p.exists():
-        raise _public_error(404, "not_found")
-    return FileResponse(p)
+def root() -> dict[str, Any]:
+    """API-only root — UI web đã gỡ khỏi repo."""
+    return {
+        "service": "doc-intel-tool",
+        "version": __version__,
+        "mode": "api_only",
+        "docs": "/docs",
+        "health": "/health",
+        "endpoints": {
+            "analyze_upload": "POST /v1/analyze/upload",
+            "analyze": "POST /v1/analyze",
+            "ask": "POST /v1/ask",
+            "tools": "GET /v1/tools",
+            "job": "GET /v1/jobs/{job_id}",
+            "pages": "GET /v1/jobs/{job_id}/pages",
+        },
+    }
 
 
 @app.get("/v1/tools")
