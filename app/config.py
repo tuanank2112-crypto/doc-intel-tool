@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Ưu tiên key từ .env; hardcode chỉ fallback dev (đừng commit key production)
     gemini_api_key: str = ""
     llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    llm_model: str = "gemini-3.1-flash-lite"   # hoặc "gemini-2.0-flash" nếu muốn nhanh nhất
+    llm_model: str = "gemini-3.1-flash-lite"
 
     # 0 / negative = no page cut (user forbids truncating document content)
     max_pages_budget: int = 500

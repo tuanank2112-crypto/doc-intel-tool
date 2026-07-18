@@ -10,11 +10,12 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .config import UPLOADS, settings
+from .config import ROOT, UPLOADS, settings
 from .llm import llm_enabled
 from .pipeline import analyze_paths
 from .qa import ask_job
@@ -35,6 +36,8 @@ app = FastAPI(
     version=__version__,
 )
 
+WEB = ROOT / "web"
+
 # CORS: local demo only — override via CORS_ORIGINS env (comma-separated)
 _cors = (getattr(settings, "cors_origins", None) or "http://127.0.0.1:8090,http://localhost:8090").split(",")
 _cors = [o.strip() for o in _cors if o.strip()]
@@ -45,6 +48,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+if WEB.exists():
+    app.mount("/static", StaticFiles(directory=str(WEB)), name="static")
 
 
 # --- Limits (Notion review) ---
@@ -76,11 +81,18 @@ class ToolCallRequest(BaseModel):
 
 
 def _public_error(status: int, code: str, *, detail: str | None = None) -> HTTPException:
-    """Never leak stack traces / internal paths to clients."""
-    body: dict[str, Any] = {"error": code}
+    """Never leak stack traces / internal paths to clients.
+
+    detail must be a STRING so frontend Error(detail) không thành [object Object].
+    """
+    # FastAPI wraps this as {"detail": <this>}. Always pass a plain string or simple dict
+    # with string fields that UI can read as detail.error / detail.message.
+    msg = code
     if detail and status < 500:
-        body["detail"] = detail[:200]
-    return HTTPException(status, body)
+        msg = f"{code}: {detail[:200]}"
+    elif detail:
+        msg = f"{code}: {str(detail)[:200]}"
+    return HTTPException(status_code=status, detail={"error": code, "message": msg})
 
 
 async def _stream_save_upload(upload: UploadFile, dest: Path, *, max_bytes: int) -> int:
@@ -119,23 +131,29 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/")
-def root() -> dict[str, Any]:
-    """API-only root — UI web đã gỡ khỏi repo."""
-    return {
-        "service": "doc-intel-tool",
-        "version": __version__,
-        "mode": "api_only",
-        "docs": "/docs",
-        "health": "/health",
-        "endpoints": {
-            "analyze_upload": "POST /v1/analyze/upload",
-            "analyze": "POST /v1/analyze",
-            "ask": "POST /v1/ask",
-            "tools": "GET /v1/tools",
-            "job": "GET /v1/jobs/{job_id}",
-            "pages": "GET /v1/jobs/{job_id}/pages",
-        },
-    }
+@app.get("/tro-ly-hop-ubnd-v2.html")
+def index() -> FileResponse:
+    for name in ("tro-ly-hop-ubnd-v2.html", "index.html"):
+        index_path = WEB / name
+        if index_path.exists():
+            return FileResponse(index_path)
+    raise _public_error(404, "ui_not_found")
+
+
+@app.get("/test.png")
+def asset_test_png() -> FileResponse:
+    p = WEB / "test.png"
+    if not p.exists():
+        raise _public_error(404, "not_found")
+    return FileResponse(p)
+
+
+@app.get("/Emblem_of_Vietnam.svg.webp")
+def asset_emblem() -> FileResponse:
+    p = WEB / "Emblem_of_Vietnam.svg.webp"
+    if not p.exists():
+        raise _public_error(404, "not_found")
+    return FileResponse(p)
 
 
 @app.get("/v1/tools")
@@ -403,7 +421,8 @@ async def ask(body: AskRequest) -> dict[str, Any]:
         result = await ask_job(body.job_id, body.question)
     except Exception as e:
         log.exception("ask failed: %s", e)
-        raise _public_error(500, "ask_failed") from None
+        # message string — frontend đọc detail.message
+        raise _public_error(500, "ask_failed", detail=str(e)[:200]) from None
     if result.get("error") == "job_not_found":
         raise _public_error(404, "job_not_found")
     if result.get("error") == "empty_question":

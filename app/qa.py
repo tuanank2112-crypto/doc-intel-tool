@@ -141,7 +141,28 @@ async def ask_job(job_id: str, question: str) -> dict[str, Any]:
         f"Thuật ngữ/điều khoản đã gắn cờ:\n" + "\n".join(extra_ctx[:20]) + "\n\n"
         f"Đoạn trích truy xuất:\n\n" + "\n\n---\n\n".join(passages)
     )
-    data = await achat_json(QA_SYSTEM, user, temperature=0.1, max_tokens=1800)
+    try:
+        data = await achat_json(QA_SYSTEM, user, temperature=0.1, max_tokens=1800)
+    except Exception as e:
+        # 429 quota / timeout / network: vẫn trả lời bằng tìm kiếm thô + thông báo rõ
+        msg = str(e)
+        low = msg.lower()
+        if "429" in msg or "resource_exhausted" in low or "quota" in low:
+            note = (
+                "[LLM tạm quá tải / hết quota Gemini — trả lời bằng tìm kiếm thô trên văn bản] "
+            )
+        elif "timeout" in low:
+            note = "[LLM timeout — trả lời bằng tìm kiếm thô trên văn bản] "
+        else:
+            note = f"[LLM lỗi: {msg[:160]} — trả lời bằng tìm kiếm thô] "
+        out = _heuristic_answer(question, hits)
+        out["job_id"] = job_id
+        out["question"] = question
+        out["answer"] = note + (out.get("answer") or "")
+        out["llm_error"] = msg[:400]
+        out["answer_mode"] = "heuristic_fallback"
+        return out
+
     return {
         "job_id": job_id,
         "question": question,
