@@ -1,0 +1,33 @@
+{
+  "name": "doc-intel-tool",
+  "description": "Smart document summarization and meeting Q&A for Vietnamese officials",
+  "base_url": "http://127.0.0.1:8090",
+  "tools_endpoint": "GET /v1/tools",
+  "call_endpoint": "POST /v1/tools/call",
+  "tools": [
+    {
+      "name": "analyze_documents",
+      "method": "POST",
+      "path": "/v1/tools/call",
+      "body": {
+        "name": "analyze_documents",
+        "arguments": {
+          "paths": ["/path/to/folder-or-files"],
+          "title": "optional"
+        }
+      }
+    },
+    {
+      "name": "ask_document",
+      "method": "POST",
+      "path": "/v1/tools/call",
+      "body": {
+        "name": "ask_document",
+        "arguments": {
+          "job_id": "JOB_ID",
+          "question": "Câu hỏi tiếng Việt?"
+        }
+      }
+    }
+  ]
+}
