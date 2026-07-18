@@ -51,13 +51,12 @@ PDF text layer (PyMuPDF + tables)
 
 Không có Gemini key: vẫn extract text layer; trang scan sẽ trống (cảnh báo trong `warnings`).
 
-## Chạy server (API-only)
-
-Repo **không kèm UI web** — dùng Swagger hoặc gọi HTTP/CLI.
+## Chạy server
 
 ```bash
 source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8090
+# UI:      http://127.0.0.1:8090
 # Health:  http://127.0.0.1:8090/health
 # Swagger: http://127.0.0.1:8090/docs
 ```
@@ -156,11 +155,13 @@ def run_tool(name, arguments):
 Env tinh chỉnh (`.env`):
 
 ```
-MAP_CONCURRENCY=6
-CHUNK_PAGES=8
+MAP_CONCURRENCY=8
+MAX_MAP_CHUNKS=40
+MAX_CHARS_PER_CHUNK=8000
 TARGET_SECONDS=55
-MAX_PAGES_BUDGET=80
-LLM_MODEL=grok-4.5
+MAX_PAGES_BUDGET=0
+LLM_MODEL=gemini-3.1-flash-lite
+OCR_MODEL=gemini-3.1-flash-lite
 ```
 
 ## Mẫu PDF 48 trang
