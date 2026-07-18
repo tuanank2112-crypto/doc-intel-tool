@@ -907,6 +907,7 @@
         src.open = true;
 
         applyAnalysis(docId, data, displayName);
+        if (typeof saveMeetingsToLocal === "function") saveMeetingsToLocal();
         if (typeof renderMeetings === "function") renderMeetings();
         if (typeof closeUpload === "function") closeUpload();
 

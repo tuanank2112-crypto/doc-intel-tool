@@ -98,6 +98,10 @@
   .meet-sub{font-size:10.5px;color:rgba(255,255,255,.5);margin-top:2px;font-weight:400}
   .meet-chev{width:15px;height:15px;color:rgba(255,255,255,.6);flex-shrink:0;transition:transform .25s}
   .meet.on .meet-chev{transform:rotate(180deg)}
+  .meet-del{flex-shrink:0;width:18px;height:18px;border:none;background:transparent;color:rgba(255,255,255,.4);border-radius:var(--r-full);cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:.15s}
+  .meet-head:hover .meet-del{opacity:1}
+  .meet-del:hover{background:var(--primary);color:#fff}
+  .meet-del svg{width:11px;height:11px}
   .meet-body{overflow:hidden;height:0}
   .doc-item{padding:8px 8px 8px 27px;font-size:12px;color:rgba(255,255,255,.75);cursor:pointer;display:flex;gap:8px;align-items:flex-start;line-height:1.35;transition:background .15s,color .15s}
   .doc-item:hover{background:rgba(255,255,255,.06);color:#fff}
@@ -711,7 +715,7 @@
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
 <script>
 /* ---------- Kỳ họp sắp tới (accordion) ---------- */
-const meetings = [
+let meetings = [
   {name:'Kỳ họp thứ 12 · HĐND tỉnh', date:'17/07/2026', open:true, docs:[
     {t:'Dự thảo Nghị quyết phân bổ ngân sách 2026', on:true, docId:'d1'},
     {t:'Báo cáo giám sát đầu tư công quý III'}
@@ -725,7 +729,7 @@ const meetings = [
     {t:'Đề án chuyển đổi số cấp xã giai đoạn 2026–2030'}
   ]}
 ];
-const pastMeetings = [
+let pastMeetings = [
   {name:'Kỳ họp thứ 11 · HĐND tỉnh', date:'28/06/2026', docs:[
     {t:'Nghị quyết quyết toán ngân sách 2025'},
     {t:'Báo cáo kết quả giám sát chuyên đề'}
@@ -736,7 +740,20 @@ const pastMeetings = [
     {t:'Kết luận phiên họp thường kỳ'}
   ]}
 ];
-
+function saveMeetingsToLocal(){
+  try{
+    localStorage.setItem('gov_meetings', JSON.stringify(meetings));
+    localStorage.setItem('gov_past_meetings', JSON.stringify(pastMeetings));
+  }catch(e){}
+}
+function loadMeetingsFromStorage(){
+  try{
+    const localM=localStorage.getItem('gov_meetings');
+    const localPM=localStorage.getItem('gov_past_meetings');
+    if(localM) meetings=JSON.parse(localM);
+    if(localPM) pastMeetings=JSON.parse(localPM);
+  }catch(e){}
+}
 /* all[] gộp cả hai nhóm để mỗi accordion có index toàn cục duy nhất */
 let allMeetings=[];
 function meetHTML(m,i){
@@ -745,6 +762,9 @@ function meetHTML(m,i){
       <div class="meet-head" onclick="toggleMeet(${i})">
         <span class="meet-dot"></span>
         <div class="meet-name">${m.name}<div class="meet-sub">Họp ${m.date} · ${m.docs.length} tài liệu</div></div>
+        <button class="meet-del" title="Xoá kỳ họp" onclick="askDelMeet(event,${i})">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+        </button>
         <svg class="meet-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
       </div>
       <div class="meet-body">
@@ -783,32 +803,62 @@ function toggleMeet(i){
   setMeetBody(i,!wasOpen);
 }
 
-/* ---------- Xoá tài liệu (có xác nhận) ---------- */
-let delTarget=null;   // {mi, di}
+/* ---------- Xoá tài liệu / kỳ họp (AFS) ---------- */
+let delTarget=null;      // {mi, di}
+let delMeetTarget=null;  // mi
 function askDelDoc(ev,mi,di){
-  ev.stopPropagation();            // đừng để bấm X làm gập accordion
+  ev.stopPropagation();
+  delMeetTarget=null;
   delTarget={mi,di};
   const name=allMeetings[mi].docs[di].t;
   document.getElementById('cfText').innerHTML=`Bạn có chắc muốn xoá tài liệu <b>“${name}”</b> khỏi thư mục kỳ họp? Thao tác này không thể hoàn tác.`;
-  const scrim=document.getElementById('confirmModal');
-  scrim.classList.add('show');
+  document.getElementById('confirmModal').classList.add('show');
+  if(!reduce) gsap.fromTo('.confirm-box',{y:16,scale:.96,autoAlpha:0},{y:0,scale:1,autoAlpha:1,duration:.3,ease:'back.out(1.5)'});
+}
+function askDelMeet(ev,mi){
+  ev.stopPropagation();
+  delTarget=null;
+  delMeetTarget=mi;
+  const name=allMeetings[mi].name;
+  document.getElementById('cfText').innerHTML=`Bạn có chắc muốn xoá kỳ họp <b>“${name}”</b> cùng toàn bộ tài liệu bên trong? Thao tác này không thể hoàn tác.`;
+  document.getElementById('confirmModal').classList.add('show');
   if(!reduce) gsap.fromTo('.confirm-box',{y:16,scale:.96,autoAlpha:0},{y:0,scale:1,autoAlpha:1,duration:.3,ease:'back.out(1.5)'});
 }
 function closeConfirm(){
   delTarget=null;
+  delMeetTarget=null;
   document.getElementById('confirmModal').classList.remove('show');
 }
+function doDelMeet(){
+  if(delMeetTarget===null) return;
+  const mi=delMeetTarget;
+  const nUp=meetings.length;
+  const src=mi<nUp ? meetings[mi] : pastMeetings[mi-nUp];
+  // copy docs trước khi splice — xóa hết note + câu hỏi của các file trong thư mục
+  const docsSnapshot=(src.docs||[]).slice();
+  purgeNotesForDocs(docsSnapshot);
+  if(mi<nUp) meetings.splice(mi,1);
+  else pastMeetings.splice(mi-nUp,1);
+  closeConfirm();
+  saveMeetingsToLocal();
+  renderMeetings();
+  if(typeof renderNotes==='function') renderNotes();
+}
 function doDelDoc(){
+  if(delMeetTarget!==null){ doDelMeet(); return; }
   if(!delTarget)return;
   const {mi,di}=delTarget;
   const name=allMeetings[mi].name;
-  // trỏ về mảng nguồn thật
   const nUp=meetings.length;
   const src = mi<nUp ? meetings[mi] : pastMeetings[mi-nUp];
+  const removed=src.docs[di] ? Object.assign({}, src.docs[di]) : null;
+  if(removed) purgeNotesForDocs([removed]);
   src.docs.splice(di,1);
-  src.open=true;                   // giữ mở sau khi xoá
+  src.open=true;
   closeConfirm();
+  saveMeetingsToLocal();
   renderMeetings();
+  if(typeof renderNotes==='function') renderNotes();
   const i=allMeetings.findIndex(x=>x.name===name);
   if(i>=0) setMeetBody(i,true,true);
 }
@@ -857,6 +907,7 @@ function confirmNewFolder(){
   if(!name)return;
   // tạo thư mục kỳ họp mới (thêm vào nhóm "sắp tới")
   meetings.push({name, date:'—', docs:[], open:false});
+  saveMeetingsToLocal();
   renderMeetings();                 // cập nhật allMeetings + rail
   selFolder=meetings.length-1;      // thư mục mới nằm cuối nhóm sắp tới = cùng index trong allMeetings
   cancelNewFolder(); renderFolderGrid(); syncConfirm();
@@ -888,6 +939,7 @@ function confirmUpload(){
   pendingFiles.forEach(n=>src.docs.push({t:n}));
   src.open=true;
   const name=src.name;
+  saveMeetingsToLocal();
   renderMeetings();
   closeUpload();
   const i=allMeetings.findIndex(x=>x.name===name);
@@ -1366,11 +1418,48 @@ function loadNotesFromStorage(){
   const currentUser=localStorage.getItem('gov_user')||'default';
   try{ notes=JSON.parse(localStorage.getItem('gov_notes_'+currentUser)||'[]'); }
   catch(e){ notes=[]; }
+  if(!Array.isArray(notes)) notes=[];
 }
 function saveNotesToStorage(){
   const currentUser=localStorage.getItem('gov_user')||'default';
   try{ localStorage.setItem('gov_notes_'+currentUser, JSON.stringify(notes)); }
   catch(e){}
+}
+/** Xóa ghi chú + câu hỏi gắn với file (gọi khi xóa file/thư mục) */
+function purgeNotesForDocs(docs){
+  const ids=new Set();
+  const labels=new Set(); // lower-case for match
+  function addLabel(s){
+    if(s==null) return;
+    const t=String(s).trim();
+    if(t) labels.add(t.toLowerCase());
+  }
+  (docs||[]).forEach(d=>{
+    if(!d) return;
+    if(d.docId!=null && String(d.docId)!=='') ids.add(String(d.docId));
+    addLabel(d.t);
+    try{
+      if(d.docId && typeof DOCS!=='undefined' && DOCS[d.docId]){
+        addLabel(DOCS[d.docId].name);
+      }
+    }catch(e){}
+  });
+  if(!Array.isArray(notes)) notes=[];
+  const kept=[];
+  for(let i=0;i<notes.length;i++){
+    const n=notes[i];
+    if(!n) continue;
+    const nid=(n.docId!=null && String(n.docId)!=='') ? String(n.docId) : '';
+    const ndoc=(n.doc!=null) ? String(n.doc).trim() : '';
+    let drop=false;
+    if(nid && ids.has(nid)) drop=true;
+    else if(ndoc && labels.has(ndoc.toLowerCase())) drop=true;
+    else if(nid && labels.has(nid.toLowerCase())) drop=true;
+    if(!drop) kept.push(n); // note + qs đi theo object — xóa cả cụm
+  }
+  notes=kept;
+  saveNotesToStorage();
+  renderNotes();
 }
 
 function findArticle(node){
@@ -1416,7 +1505,15 @@ function saveSelection(){
     try{ range.surroundContents(mark); }
     catch(e){ mark.appendChild(range.extractContents()); range.insertNode(mark); }
   }
-  notes.unshift({text:pendingSel.text, src:pendingSel.src, docId:pendingSel.doc, doc:DOCS[pendingSel.doc].name, time:'Vừa lưu', refId:id, qs:[]});
+  notes.unshift({
+    text:pendingSel.text,
+    src:pendingSel.src,
+    docId:pendingSel.doc,
+    doc:(DOCS[pendingSel.doc]&&DOCS[pendingSel.doc].name)||pendingSel.doc,
+    time:'Vừa lưu',
+    refId:id,
+    qs:[]
+  });
   document.getElementById('saveNoteBtn').classList.remove('show');
   window.getSelection().removeAllRanges();
   pendingSel=null;
@@ -1560,7 +1657,9 @@ function restoreLoginSession(){
 }
 
 /* ---------- Init + intro timeline + ScrollTrigger ---------- */
-loadDocData('d1');renderSummary(5);renderTerms(terms);renderQuestions();renderMeetings();renderNotif();
+loadDocData('d1');renderSummary(5);renderTerms(terms);renderQuestions();renderNotif();
+loadMeetingsFromStorage();
+renderMeetings();
 // ghi chú: load theo user sau restoreLogin / doLogin (AFS)
 loadNotesFromStorage();
 renderNotes();
