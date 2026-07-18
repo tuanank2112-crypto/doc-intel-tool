@@ -287,16 +287,80 @@ def _extract_tables_pymupdf(page: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _reorder_masthead(
+    blocks: list[tuple[float, float, float, float, str]],
+    page_width: float,
+) -> list[tuple[float, float, float, float, str]]:
+    """Sap xep lai khoi tieu de (masthead) 2 cot cua van ban hanh chinh VN.
+
+    PDF born-digital tra text theo thu tu doc tren->duoi nen masthead 2 cot bi
+    DAN XEN: 'CO QUAN' / 'So: ...' (cot trai) tron voi 'CONG HOA...' /
+    'Doc lap...' / 'ngay...' (cot phai). Ngoai ra Quoc hieu hay bi xuong dong
+    ('...VIET' + 'NAM') nen regex Quoc hieu o frontend khong khop.
+
+    Ham nay: tach 2 cot o vung dinh trang, gop dong Quoc hieu bi xuong dong,
+    roi xuat theo thu tu chuan: cot trai (co quan, so hieu) -> cot phai
+    (quoc hieu, tieu ngu, dia danh/ngay) -> phan than con lai giu nguyen.
+    """
+    if not blocks:
+        return blocks
+    TOP_ZONE = 165.0
+    mid = (page_width or 595.0) / 2.0
+
+    def cx(b: tuple[float, float, float, float, str]) -> float:
+        return (b[0] + b[2]) / 2.0
+
+    top = [b for b in blocks if b[1] < TOP_ZONE]
+    rest = [b for b in blocks if b[1] >= TOP_ZONE]
+    has_national = any(
+        cx(b) >= mid and re.search(r"CỘNG\s*HÒA\s*XÃ\s*HỘI", b[4] or "")
+        for b in top
+    )
+    if not has_national or len(top) < 2:
+        return blocks
+
+    left = sorted((b for b in top if cx(b) < mid), key=lambda b: b[1])
+    right = sorted((b for b in top if cx(b) >= mid), key=lambda b: b[1])
+
+    def flat(b: tuple[float, float, float, float, str]) -> str:
+        return re.sub(r"\s+", " ", str(b[4]).replace("\n", " ")).strip()
+
+    # Gop Quoc hieu bi xuong dong: '...VIET' + 'NAM' -> '...VIET NAM'
+    merged_right: list[str] = []
+    k = 0
+    while k < len(right):
+        t = flat(right[k])
+        if re.search(r"CỘNG\s*HÒA", t) and not re.search(r"VIỆT\s*NAM", t):
+            k += 1
+            while k < len(right) and "NAM" not in t.upper():
+                t = (t + " " + flat(right[k])).strip()
+                k += 1
+        else:
+            k += 1
+        if t:
+            merged_right.append(t)
+
+    ordered = [flat(b) for b in left if flat(b)] + merged_right
+    y0 = min((b[1] for b in top), default=0.0)
+    x0 = min((b[0] for b in top), default=0.0)
+    synth = (x0, y0, page_width, TOP_ZONE, "\n".join(ordered))
+    return [synth] + rest
+
+
 def _page_text_excluding_tables(
     page: Any, table_bboxes: list[tuple[float, float, float, float]]
 ) -> str:
-    """Extract body text while skipping regions covered by detected tables."""
+    """Extract body text while skipping table regions; reorder VN masthead.
+
+    Dung get_text("blocks") de co toa do -> vua bo vung bang, vua sap xep lai
+    khoi Quoc hieu / co quan ban hanh 2 cot (xem _reorder_masthead).
+    """
     try:
         blocks = page.get_text("blocks") or []
     except Exception:
         return _clean_page_text(page.get_text("text") or "")
 
-    parts: list[str] = []
+    kept: list[tuple[float, float, float, float, str]] = []
     for b in blocks:
         if len(b) < 5:
             continue
@@ -304,16 +368,18 @@ def _page_text_excluding_tables(
         if not str(text).strip():
             continue
         bb = (float(x0), float(y0), float(x1), float(y1))
-        skip = False
-        for tb in table_bboxes:
-            if _bbox_overlap(bb, tb):
-                skip = True
-                break
-        if skip:
+        if any(_bbox_overlap(bb, tb) for tb in table_bboxes):
             continue
-        parts.append(str(text).strip())
-    if not parts:
+        kept.append((float(x0), float(y0), float(x1), float(y1), str(text)))
+    if not kept:
         return _clean_page_text(page.get_text("text") or "")
+
+    try:
+        page_w = float(page.rect.width)
+    except Exception:
+        page_w = 595.0
+    kept = _reorder_masthead(kept, page_w)
+    parts = [str(b[4]).strip() for b in kept if str(b[4]).strip()]
     return _clean_page_text("\n".join(parts))
 
 
@@ -324,6 +390,7 @@ def _extract_page_images_from_page(
     min_w: int = 90,
     min_h: int = 90,
     full_page_ratio: float = 0.82,
+    max_px_width: int = 1000,
 ) -> list[str]:
     """Trich anh raster nhung tren 1 trang -> data-URL PNG.
 
@@ -338,6 +405,15 @@ def _extract_page_images_from_page(
     out: list[str] = []
     for img in page.get_images(full=True):
         xref = img[0]
+        # Dien tich HIEN THI thuc te tren trang (point^2), KHONG phai pixel.
+        # (So pixel khac don vi voi point -> ratio > 1 -> loai nham moi bieu do.)
+        try:
+            rects = page.get_image_rects(xref)
+        except Exception:
+            rects = []
+        disp_area = 0.0
+        for r in rects:
+            disp_area = max(disp_area, abs(r.width * r.height))
         try:
             pix = fitz.Pixmap(doc, xref)
         except Exception:
@@ -345,15 +421,43 @@ def _extract_page_images_from_page(
         try:
             if pix.width < min_w or pix.height < min_h:
                 continue
-            if (pix.width * pix.height) > full_page_ratio * page_area:
-                continue  # full-page scan / background
+            # Chi loai anh CHIEM gan full-page (trang scan/nen) dua tren dien
+            # tich HIEN THI, khong dua tren so pixel cua anh.
+            if disp_area > 0 and disp_area > full_page_ratio * page_area:
+                continue
             if pix.n - pix.alpha >= 4:  # CMYK -> RGB
                 pix = fitz.Pixmap(fitz.csRGB, pix)
             png = pix.tobytes("png")
-            out.append("data:image/png;base64," + base64.b64encode(png).decode("ascii"))
         finally:
             pix = None  # type: ignore[assignment]
+        # Toi uu dung luong: ha be rong ve <= max_px_width + nen lai PNG.
+        png = _downscale_png(png, max_px_width=max_px_width)
+        out.append(
+            "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        )
     return out
+
+
+def _downscale_png(png: bytes, *, max_px_width: int = 1000) -> bytes:
+    """Ha be rong anh ve <= max_px_width va nen lai PNG (giam dung luong HTML)."""
+    try:
+        from PIL import Image
+    except Exception:
+        return png
+    import io
+
+    try:
+        im = Image.open(io.BytesIO(png))
+        if im.width > max_px_width:
+            ratio = max_px_width / float(im.width)
+            new_h = max(1, int(im.height * ratio))
+            im = im.resize((max_px_width, new_h), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="PNG", optimize=True)
+        data = buf.getvalue()
+        return data if len(data) < len(png) else png
+    except Exception:
+        return png
 
 
 def extract_page_images(
@@ -401,16 +505,18 @@ def _extract_pdf_page(doc: Any, page: Any, page_no: int) -> PageText:
     - Chi chay find_tables khi trang co duong ke (gate re) -> nhanh hon nhieu.
     - Da BO fallback aligned-lines (vua cham vua cat chu giua tu).
     """
-    # find_tables(strategy="lines") da re san khi trang khong co bang ke -> goi
-    # truc tiep, KHONG can _page_has_ruling_lines (tranh quet get_drawings 2 lan/trang).
-    tables = _extract_tables_pymupdf(page)
+    # Cong nhanh: chi chay find_tables khi trang co duong ke (rectangles/lines).
+    # find_tables(strategy="lines") chi bat bang CO VIEN, nen gate nay KHONG bo
+    # sot bang nao ma tranh clustering ton kem tren trang van xuoi -> nhanh hon.
+    if _page_has_ruling_lines(page):
+        tables = _extract_tables_pymupdf(page)
+    else:
+        tables = []
 
     bboxes = [tuple(t["bbox"]) for t in tables if t.get("bbox")]
-    body = (
-        _page_text_excluding_tables(page, bboxes)
-        if tables
-        else _clean_page_text(page.get_text("text") or "")
-    )
+    # Luon dung duong dan theo block (co toa do) de con sap xep lai masthead
+    # 2 cot ngay ca khi trang KHONG co bang (trang dau moi van ban).
+    body = _page_text_excluding_tables(page, bboxes)
 
     # Plain text cho LLM / search (giu markdown bang)
     text_parts: list[str] = []
@@ -459,6 +565,24 @@ def _extract_pdf_page(doc: Any, page: Any, page_no: int) -> PageText:
     return pt
 
 
+def _extract_page_range_proc(
+    path_str: str, idxs: list[int]
+) -> list[tuple[int, PageText]]:
+    """Worker chay trong TIEN TRINH rieng (an toan voi PyMuPDF).
+
+    PyMuPDF/MuPDF khong thread-safe: nhieu THREAD (du moi thread mo doc rieng)
+    van lam hong context toan cuc -> find_tables tra bbox/bang RAC. Moi TIEN
+    TRINH co interpreter + context MuPDF rieng nen an toan tuyet doi.
+    """
+    import fitz
+
+    wd = fitz.open(path_str)
+    try:
+        return [(i, _extract_pdf_page(wd, wd.load_page(i), i + 1)) for i in idxs]
+    finally:
+        wd.close()
+
+
 def _extract_pdf(path: Path) -> tuple[list[PageText], str, list[str]]:
     warnings: list[str] = []
     try:
@@ -475,45 +599,60 @@ def _extract_pdf(path: Path) -> tuple[list[PageText], str, list[str]]:
         n = base.page_count
         _t0 = time.time()
 
-        # Song song hoa theo TRANG. fitz KHONG chia se duoc mot Document giua cac
-        # thread -> moi worker mo doc RIENG (mo 1 lan/worker, KHONG reopen moi
-        # trang). Ket hop find_tables(strategy="lines") -> nhanh & an toan.
-        # Chinh bang bien moi truong EXTRACT_WORKERS (dat =1 de ep chay tuan tu).
+        # PyMuPDF/MuPDF KHONG thread-safe: nhieu THREAD (du moi thread mo doc
+        # rieng) van lam hong context toan cuc -> find_tables tra bbox/bang RAC
+        # (bang "vo", tron van ban vao o header). Vi vay:
+        #  - Mac dinh chay TUAN TU (an toan; ~3-7s cho 60-70 trang, thua <60s).
+        #  - Dat EXTRACT_WORKERS>1 de bat song song hoa bang TIEN TRINH (process)
+        #    -> moi tien trinh co interpreter rieng nen an toan.
         try:
-            workers = int(os.environ.get("EXTRACT_WORKERS", "0") or 0)
+            workers = int(os.environ.get("EXTRACT_WORKERS", "1") or 1)
         except ValueError:
-            workers = 0
+            workers = 1
         if workers <= 0:
-            workers = min(8, (os.cpu_count() or 4))
+            workers = 1
         workers = max(1, min(workers, n or 1))
 
-        def _work_range(idxs: list[int]) -> list[tuple[int, PageText]]:
-            wd = fitz.open(path)
+        pages = []
+        used_parallel = False
+        if workers > 1:
             try:
-                return [
-                    (i, _extract_pdf_page(wd, wd.load_page(i), i + 1)) for i in idxs
-                ]
-            finally:
-                wd.close()
+                import multiprocessing as _mp
+                from concurrent.futures import ProcessPoolExecutor
 
-        if workers == 1:
+                buckets: list[list[int]] = [[] for _ in range(workers)]
+                for i in range(n):
+                    buckets[i % workers].append(i)  # rai deu trang co bang
+                nonempty = [b for b in buckets if b]
+                collected: dict[int, PageText] = {}
+                ctx = _mp.get_context("fork")
+                with ProcessPoolExecutor(
+                    max_workers=workers, mp_context=ctx
+                ) as ex:
+                    for part in ex.map(
+                        _extract_page_range_proc,
+                        [str(path)] * len(nonempty),
+                        nonempty,
+                    ):
+                        for idx, pt in part:
+                            collected[idx] = pt
+                pages = [collected[i] for i in range(n)]
+                used_parallel = True
+            except Exception as e:  # noqa: BLE001 - fallback an toan
+                warnings.append(
+                    f"Song song hoa tien trinh loi ({e}); chay tuan tu."
+                )
+                pages = []
+
+        if not used_parallel:
             pages = [
                 _extract_pdf_page(base, base.load_page(i), i + 1) for i in range(n)
             ]
-        else:
-            buckets: list[list[int]] = [[] for _ in range(workers)]
-            for i in range(n):
-                buckets[i % workers].append(i)  # round-robin: rai deu trang bang
-            collected: dict[int, PageText] = {}
-            with ThreadPoolExecutor(max_workers=workers) as ex:
-                for part in ex.map(_work_range, [b for b in buckets if b]):
-                    for idx, pt in part:
-                        collected[idx] = pt
-            pages = [collected[i] for i in range(n)]
 
+        workers_used = workers if used_parallel else 1
         warnings.append(
             f"Trich xuat {n} trang trong {round(time.time() - _t0, 1)}s "
-            f"({workers} luong)."
+            f"({workers_used} luong/tien trinh)."
         )
 
         empty = sum(1 for p in pages if not p.text)
@@ -533,7 +672,11 @@ def _extract_pdf(path: Path) -> tuple[list[PageText], str, list[str]]:
             import asyncio
             import concurrent.futures
 
-            from .vision_ocr import enrich_pages_with_vision, ocr_enabled
+            from .vision_ocr import (
+                enrich_pages_with_vision,
+                enrich_images_with_vision,
+                ocr_enabled,
+            )
             from .config import settings
 
             if ocr_enabled():
@@ -547,7 +690,15 @@ def _extract_pdf(path: Path) -> tuple[list[PageText], str, list[str]]:
                     ocr_budget = 30.0
 
                 async def _run_ocr():
-                    coro = enrich_pages_with_vision(path, pages, mode=mode)
+                    async def _do():
+                        pgs, w1 = await enrich_pages_with_vision(
+                            path, pages, mode=mode
+                        )
+                        # Doc so lieu tu anh bieu do (chart) tren trang born-digital.
+                        pgs, w2 = await enrich_images_with_vision(pgs, mode=None)
+                        return pgs, (list(w1) + list(w2))
+
+                    coro = _do()
                     if ocr_budget > 0:
                         return await asyncio.wait_for(coro, timeout=ocr_budget)
                     return await coro

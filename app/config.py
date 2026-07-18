@@ -22,12 +22,14 @@ class Settings(BaseSettings):
     port: int = 8090
 
     # LLM provider: openai_compatible | gemini | xai
-    llm_provider: str = "openai_compatible"
+    # (bắt buộc có field — settings.provider đọc llm_provider)
+    llm_provider: str = "gemini"
     xai_api_key: str = ""
     llm_api_key: str = ""
+    # Ưu tiên key từ .env; hardcode chỉ fallback dev (đừng commit key production)
     gemini_api_key: str = ""
-    llm_base_url: str = "https://9flare.com/api/v1"
-    llm_model: str = "pro/claude-haiku-4-5"
+    llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    llm_model: str = "gemini-3.1-flash-lite"   # hoặc "gemini-2.0-flash" nếu muốn nhanh nhất
 
     # 0 / negative = no page cut (user forbids truncating document content)
     max_pages_budget: int = 500
@@ -50,10 +52,16 @@ class Settings(BaseSettings):
     # --- Gemini Vision OCR (PDF page → image → text) ---
     # auto: only sparse/empty pages; always: every page; off: never
     ocr_mode: str = "auto"
-    ocr_model: str = "gemini-2.5-flash"
-    ocr_concurrency: int = 4  # safer default (Notion review)
-    ocr_dpi: int = 200  # cao hơn để bảng/chữ nhỏ ít mất nét
+    ocr_model: str = "gemini-3.1-flash-lite"
+    ocr_concurrency: int = 8  # tang throughput OCR (don gian nhat de <60s);
+    # neu API tier thap bi 429 nhieu -> ha ve 4-6; neu tier tra phi -> tang 10-12
+    ocr_dpi: int = 180  # can bang net/toc do; ha 150 neu can nhanh hon nua,
+    # nhung bang/chu nho co the mat net -> chi ha khi chat luong con du tot
     ocr_api_key: str = ""  # optional override; else gemini_api_key
+
+    # Doc so lieu tu ANH bieu do (chart) tren trang born-digital qua Gemini Vision.
+    # "off" = tat (mac dinh); "auto"/"on" = bat. Env override: CHART_VISION.
+    chart_vision: str = "auto"
 
     # Upload limits
     max_upload_files: int = 10

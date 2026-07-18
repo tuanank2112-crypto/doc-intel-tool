@@ -256,7 +256,7 @@
    * Chữ ký nửa phải; chỉ nhận loại VB khi HOA thật; bảng cần dòng ---.
    * Cơ quan ban hành + số hiệu canh TRÁI (khối trên-trái của VB).
    */
-  function renderStructuredBody(text, anchorId) {
+  function renderStructuredBody(text, anchorId, ctx) {
     if (!text || !String(text).trim()) return "";
     var lines = String(text).replace(/\r/g, "").split("\n");
     var out = [];
@@ -302,6 +302,75 @@
 
     var typeRe =
       /^(NGHỊ ĐỊ NH|QUYẾT ĐỊ NH|THÔNG TƯ|THÔNG TƯ LIÊN TỊ CH|NGHỊ QUYẾT|CHỈ THỊ|LUẬT|BỘ LUẬT|PHÁP LỆNH|CÔNG VĂN|TỜ TRÌNH|BÁO CÁO|ĐỀ ÁN|QUY CHẾ|HƯỚNG DẪN|KẾ HOẠCH|CHƯƠNG TRÌNH)\b/;
+
+    function _mhCoQuan(ln) {
+      return /^(ỦY\s*BAN|UBND|BỘ\s|CHÍNH\s*PHỦ|THỦ\s*TƯỚNG|HỘI\s*ĐỒNG|HĐND|QUỐC\s*HỘI|VĂN\s*PHÒNG|SỞ\s|TỔNG\s*CỤC|CỤC\s|BAN\s|TỈNH\s|THÀNH\s*PHỐ|ĐOÀN)/i.test(ln);
+    }
+    function _mhSo(ln) {
+      return (
+        /^(Số|SỐ)\s*[:：]/.test(ln) ||
+        /\b(NĐ|QĐ|TT|BC|NQ|CT|KH|TTr|HD|CV)\s*số/i.test(ln) ||
+        /\d+\s*\/\s*\d{2,4}\s*\/\s*[A-ZĐ]/.test(ln)
+      );
+    }
+    function _mhQuoc(ln) {
+      // Chi khop khi DONG BAT DAU la quoc hieu; tranh nham dong "Can cu ... Cong hoa ... Viet Nam;"
+      return /^\s*CỘNG\s*HÒA\s*XÃ\s*HỘI\s*CHỦ\s*NGHĨA\s*VIỆT/i.test(ln);
+    }
+    function _mhTieu(ln) {
+      return /Độc\s*lập\s*[-–—]\s*Tự\s*do\s*[-–—]\s*Hạnh\s*phúc/i.test(ln);
+    }
+    function _mhNgay(ln) {
+      return /,\s*ngày\s+\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}/i.test(ln);
+    }
+    /** Gom khoi masthead: tra {left,right,next} hoac null neu khong phai masthead */
+    function collectMasthead(startIdx) {
+      var left = [], right = [], j = startIdx, cnt = 0, seenQuoc = false;
+      while (j < lines.length && cnt < 12) {
+        var t = lines[j].trim();
+        if (!t) { j++; continue; }
+        if (_mhQuoc(t)) { right.push({ t: t, k: "q" }); seenQuoc = true; j++; cnt++; continue; }
+        if (_mhTieu(t)) { right.push({ t: t, k: "t" }); j++; cnt++; continue; }
+        if (_mhNgay(t)) { right.push({ t: t, k: "d" }); j++; cnt++; break; }
+        if (_mhSo(t)) { left.push({ t: t, k: "s" }); j++; cnt++; continue; }
+        if (_mhCoQuan(t) || (left.length && !seenQuoc && t.length <= 45 && t === t.toUpperCase())) {
+          left.push({ t: t, k: "c" }); j++; cnt++; continue;
+        }
+        break;
+      }
+      if (!seenQuoc) return null;
+      return { left: left, right: right, next: j };
+    }
+    function renderMasthead(mh) {
+      var s = SERIF;
+      var coquan = mh.left.filter(function (x) { return x.k === "c"; });
+      var so = mh.left.filter(function (x) { return x.k === "s"; });
+      var leftHtml = "";
+      coquan.forEach(function (x) {
+        leftHtml += '<div style="' + s + ';font-weight:700;text-transform:uppercase;line-height:1.25">' + escNL(x.t) + "</div>";
+      });
+      if (coquan.length && so.length)
+        leftHtml += '<hr style="width:56%;margin:3px auto 4px;border:none;border-top:1px solid #333">';
+      so.forEach(function (x) {
+        leftHtml += '<div style="' + s + ';line-height:1.25">' + escNL(x.t) + "</div>";
+      });
+      var rightHtml = "";
+      mh.right.forEach(function (x) {
+        if (x.k === "q")
+          rightHtml += '<div style="' + s + ';font-weight:700;text-transform:uppercase;line-height:1.25">' + escNL(x.t) + "</div>";
+        else if (x.k === "t")
+          rightHtml += '<div style="' + s + ';font-weight:700;line-height:1.3;margin-bottom:2px"><span style="border-bottom:1px solid #333;padding-bottom:1px">' + escNL(x.t) + "</span></div>";
+        else
+          rightHtml += '<div style="' + s + ';font-style:italic;margin-top:4px">' + escNL(x.t) + "</div>";
+      });
+      var cols = "";
+      if (leftHtml) cols += '<div style="flex:0 0 44%;text-align:center">' + leftHtml + "</div>";
+      cols += '<div style="flex:1;text-align:center">' + rightHtml + "</div>";
+      return '<div class="masthead" style="display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin:4px 0 14px">' + cols + "</div>";
+    }
+    function docSeparator() {
+      return '<div class="doc-sep" style="border-top:2px dashed #c9c1ad;margin:52px 0 34px"></div>';
+    }
 
     var i = 0;
     while (i < lines.length) {
@@ -350,8 +419,21 @@
         continue;
       }
 
-      // Quốc hiệu
-      if (/CỘNG\s*HÒA\s*XÃ\s*HỘI\s*CHỦ\s*NGHĨA\s*VIỆT\s*NAM/i.test(ln)) {
+      // Masthead 2 cột: cơ quan + số hiệu (trái) | quốc hiệu + tiêu ngữ + ngày (phải)
+      if (_mhCoQuan(ln) || _mhQuoc(ln)) {
+        var mh = collectMasthead(i);
+        if (mh) {
+          flushPara();
+          if (ctx && ctx.docCount > 0) out.push(docSeparator());
+          if (ctx) ctx.docCount = (ctx.docCount || 0) + 1;
+          out.push(renderMasthead(mh));
+          i = mh.next;
+          continue;
+        }
+      }
+
+      // Quốc hiệu (chi khi DONG BAT DAU la quoc hieu, khong phai dong "Căn cứ...")
+      if (/^\s*CỘNG\s*HÒA\s*XÃ\s*HỘI\s*CHỦ\s*NGHĨA\s*VIỆT/i.test(ln)) {
         flushPara();
         out.push(
           '<p style="' +
@@ -404,7 +486,7 @@
         continue;
       }
 
-      // Loại VB lớn — chỉ khi dòng VIẾT HOA thật + ngắn (tránh "Quyết định này có…")
+      // Loại VB lớn — chỉ khi dòng VIẾT HOA thật + ngắn (tránh "Quy��t định này có…")
       if (ln === ln.toUpperCase() && ln.length <= 40 && typeRe.test(ln)) {
         flushPara();
         out.push(
@@ -519,13 +601,14 @@
   function buildDocHtml(analysis) {
     var pages = analysis.page_index || [];
     var parts = [];
+    var ctx = { docCount: 0 };
     for (var i = 0; i < pages.length; i++) {
       var p = pages[i];
       var pid = "live-p" + p.page;
       var text = String(p.text || "").trim();
 
       if (text) {
-        parts.push(renderStructuredBody(text, pid));
+        parts.push(renderStructuredBody(text, pid, ctx));
         if (p.tables && p.tables.length && text.indexOf("|") < 0) {
           p.tables.forEach(function (t) {
             if (t.markdown) parts.push(mdTable(t.markdown));
@@ -979,6 +1062,14 @@
     }
 
     log("hooks ready — frontend UBND tỉnh + backend Doc Intel");
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      renderStructuredBody: renderStructuredBody,
+      buildDocHtml: buildDocHtml,
+      esc: esc,
+    };
   }
 
   fetch(API + "/health")

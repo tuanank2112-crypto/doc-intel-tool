@@ -12,3 +12,4 @@ backups/
 *.bak
 *.bak.*
 .DS_Store
+.grok/

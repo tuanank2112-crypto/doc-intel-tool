@@ -75,7 +75,7 @@ def _use_json_mode() -> bool:
         return True
     base = (settings.llm_base_url or "").lower()
     model = (settings.llm_model or "").lower()
-    if "9flare" in base or "claude" in model or model.startswith("pro/"):
+    if "9flare" in base or "generativelanguage" in base or "claude" in model or model.startswith("pro/"):
         return False
     if settings.provider in ("openai_compatible", "xai"):
         # xAI often supports json_object; 9flare already excluded

@@ -59,7 +59,11 @@ QUY TẮC BẮT BUỘC:
    - Giữ tên bảng ("Bảng 1. ...") ngay trên bảng.
    - Không làm phẳng bảng thành đoạn văn.
 
-5. BIỂU ĐỒ / HÌNH ẢNH: chỉ ghi chú thích (caption) nếu có; không cố "đọc" số liệu bên trong hình.
+5. BIỂU ĐỒ / SƠ ĐỒ / HÌNH ẢNH CÓ DỮ LIỆU (biểu đồ tròn, cột, đường, miền...):
+   - Luôn ghi chú thích / tên biểu đồ nếu có (vd "Biểu đồ 1. Cơ cấu thu ngân sách 2026").
+   - NẾU biểu đồ có nhãn số / chú giải (legend) HIỂN THỊ RÕ RÀNG: trích số liệu thành BẢNG Markdown, mỗi mục một hàng (Tên mục | Giá trị/%). CHỈ chép số ĐỌC ĐƯỢC trên hình; TUYỆT ĐỐI không suy đoán, không nội suy, không bịa con số không hiển thị.
+   - NẾU không có nhãn số rõ: mô tả NGẮN GỌN loại biểu đồ và xu hướng (vd "Biểu đồ cột: giá trị tăng dần từ 2021 đến 2025"), KHÔNG kèm con số cụ thể.
+   - Ảnh trang trí (logo, quốc huy, hoa văn, con dấu): bỏ qua, không mô tả.
 
 6. KHÔNG BỊA. Nếu một vùng bị mờ/không đọc được, ghi [không đọc được]. Không suy đoán, không thêm nội dung từ trang khác.
 
@@ -470,5 +474,169 @@ async def enrich_pages_with_vision(
     warnings.append(
         f"OCR Gemini Vision ({_ocr_model_name()}): {ok}/{len(need)} trang · "
         f"concurrency={_concurrency()} · dpi={_dpi()} · {elapsed}s"
+    )
+    return pages, warnings
+
+
+# ---------------------------------------------------------------------------
+# Doc so lieu tu ANH BIEU DO (chart) — cho trang BORN-DIGITAL (khong OCR trang)
+# ---------------------------------------------------------------------------
+
+CHART_PROMPT = """Bạn nhận 1 ẢNH được cắt từ một văn bản. Nhiệm vụ:
+
+1) Nếu ảnh là BIỂU ĐỒ (tròn/donut, cột, đường, miền, thanh ngang...):
+   - Dòng đầu: tiêu đề biểu đồ nếu có (in đậm), ví dụ: **Biểu đồ 2. Cơ cấu chi ngân sách 2026**
+   - Sau đó xuất BẢNG Markdown 2 cột: | Mục | Giá trị |
+   - CHỈ ghi số/nhãn ĐỌC ĐƯỢC rõ ràng trên ảnh (nhãn %, chú thích, trục). TUYỆT ĐỐI không suy đoán/bịa số.
+   - Nếu là biểu đồ nhưng không có nhãn số rõ → thay bảng bằng 1 câu mô tả xu hướng, KHÔNG kèm số.
+2) Nếu ảnh KHÔNG phải biểu đồ (logo, quốc huy, con dấu, ảnh chụp, hình trang trí) → trả lời DUY NHẤT: NO_CHART
+
+Không thêm lời dẫn hay giải thích ngoài yêu cầu trên."""
+
+NO_CHART_MARK = "NO_CHART"
+
+
+def _data_url_to_png(data_url: str) -> bytes | None:
+    import base64
+
+    try:
+        s = data_url
+        if "," in s:
+            s = s.split(",", 1)[1]
+        return base64.b64decode(s)
+    except Exception:
+        return None
+
+
+def _is_probable_chart_image(
+    png_bytes: bytes, *, min_w: int = 200, min_h: int = 140
+) -> bool:
+    """Loc so bo TRUOC khi goi LLM: bo anh qua nho / ti le bat thuong (logo/dau)."""
+    try:
+        from PIL import Image
+
+        im = Image.open(io.BytesIO(png_bytes))
+        w, h = im.size
+        if w < min_w or h < min_h:
+            return False
+        ar = w / float(h or 1)
+        # Bieu do thuong rong (~2-3:1) hoac donut (~1:1) nhung to. Loai dai/hep la.
+        if ar < 0.5 or ar > 6.0:
+            return False
+        return True
+    except Exception:
+        return True  # khong chac -> cu thu, LLM se tra NO_CHART neu can
+
+
+async def describe_chart_image(
+    png_bytes: bytes,
+    *,
+    model_name: str | None = None,
+    executor: ThreadPoolExecutor | None = None,
+) -> str:
+    """Goi Gemini Vision doc 1 anh bieu do -> Markdown (tieu de + bang/mo ta).
+
+    Tra ve '' neu khong phai bieu do (NO_CHART) hoac loi.
+    """
+    key = _gemini_key()
+    if not key:
+        return ""
+    model_name = model_name or _ocr_model_name()
+    try:
+        from PIL import Image
+
+        model = _get_model(key, model_name)
+        img = Image.open(io.BytesIO(png_bytes))
+
+        def _call() -> str:
+            return _call_gemini_with_retry(model, [img, CHART_PROMPT])
+
+        loop = asyncio.get_running_loop()
+        if executor is not None:
+            raw = await loop.run_in_executor(executor, _call)
+        else:
+            raw = await asyncio.to_thread(_call)
+        raw = (raw or "").strip()
+        if not raw or NO_CHART_MARK in raw.upper():
+            return ""
+        return raw
+    except Exception as e:
+        log.warning("Chart vision failed: %s", e)
+        return ""
+
+
+async def enrich_images_with_vision(
+    pages: list[Any],
+    *,
+    mode: str | None = None,
+    max_charts: int = 12,
+) -> tuple[list[Any], list[str]]:
+    """Doc so lieu tu ANH nhung (bieu do) tren cac trang BORN-DIGITAL.
+
+    Voi moi anh la bieu do -> them 1 khoi Markdown (tieu de + bang so lieu) vao
+    pt.text (de hien thi + phuc vu tim kiem/hoi dap). Chay song song, gioi han
+    max_charts. KHONG dung cho trang đa OCR (scan) vi anh đa bi loai.
+    """
+    import os
+
+    warnings: list[str] = []
+    cv_mode = (
+        mode
+        or getattr(settings, "chart_vision", None)
+        or os.getenv("CHART_VISION", "off")
+        or "off"
+    ).lower()
+    if cv_mode in ("off", "false", "0", "none"):
+        return pages, warnings
+    if not ocr_enabled():
+        return pages, warnings
+
+    jobs: list[tuple[int, bytes]] = []
+    for i, p in enumerate(pages):
+        if getattr(p, "ocr_applied", False):
+            continue
+        for src in getattr(p, "images", None) or []:
+            png = _data_url_to_png(str(src))
+            if png is None or not _is_probable_chart_image(png):
+                continue
+            jobs.append((i, png))
+            if len(jobs) >= max_charts:
+                break
+        if len(jobs) >= max_charts:
+            break
+
+    if not jobs:
+        return pages, warnings
+
+    t0 = time.perf_counter()
+    conc = _concurrency()
+    sem = asyncio.Semaphore(conc)
+    executor = _get_executor(conc)
+    model_name = _ocr_model_name()
+
+    async def one(pi: int, png: bytes) -> tuple[int, str]:
+        async with sem:
+            md = await describe_chart_image(
+                png, model_name=model_name, executor=executor
+            )
+            return pi, md
+
+    results = await asyncio.gather(*[one(pi, png) for pi, png in jobs])
+    ok = 0
+    for pi, md in results:
+        if not md:
+            continue
+        ok += 1
+        pt = pages[pi]
+        block = "\n\n[DỮ LIỆU BIỂU ĐỒ]\n" + md.strip() + "\n"
+        pt.text = ((getattr(pt, "text", "") or "") + block).strip()
+        try:
+            pt.char_count = len(pt.text)
+        except Exception:
+            pass
+    elapsed = round(time.perf_counter() - t0, 3)
+    warnings.append(
+        f"Chart Vision ({model_name}): {ok}/{len(jobs)} biểu đồ đọc số · "
+        f"concurrency={conc} · {elapsed}s"
     )
     return pages, warnings
