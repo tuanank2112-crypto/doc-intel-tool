@@ -27,23 +27,18 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-### LLM tóm tắt (9flare / OpenAI-compatible)
+### LLM tóm tắt + OCR (Gemini)
 
 ```env
-LLM_PROVIDER=openai_compatible
-LLM_API_KEY=flr-...
-LLM_BASE_URL=https://9flare.com/api/v1
-LLM_MODEL=pro/claude-haiku-4-5
-```
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL=gemini-3.1-flash-lite
 
-### Gemini Vision OCR (PDF scan → đọc thẳng ảnh, không Tesseract)
-
-```env
-OCR_MODE=auto          # auto | always | off
-OCR_MODEL=gemini-2.0-flash
-OCR_CONCURRENCY=10     # free tier: 5; paid: 15–20
-OCR_DPI=150            # 200 nếu scan mờ
-GEMINI_API_KEY=...     # bắt buộc để bật Vision OCR
+OCR_MODE=auto
+OCR_MODEL=gemini-3.1-flash-lite
+OCR_CONCURRENCY=8
+OCR_DPI=180
 ```
 
 Pipeline:
