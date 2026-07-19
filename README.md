@@ -94,6 +94,20 @@ requirements.txt
 .env.example
 ```
 
+## Đánh giá (Evals)
+
+Smoke / regression set **5–6 câu** bám `samples/de_an_mau_48trang.pdf` (golden labels — người kiểm định lại).  
+Sẽ mở rộng 50–100 câu khi có corpus thi. Kết quả có cột `answer_mode`; **không dùng điểm khi LLM off** làm điểm chính.
+
+```bash
+cd repo && source .venv/bin/activate && python -m evals.run_eval
+# khuyến nghị (tránh analyze lại, tiết kiệm quota):
+python -m evals.run_eval --job-id <JOB_ID_DA_ANALYZE>
+python -m evals.run_eval --threshold 0.6
+```
+
+Metric: answer_match (ALL `expect_contains`) + `answer_partial` %, citation page/clause hit, citation verified; tổng kết Overall và **LLM-only subset**.
+
 ## Ghi chú
 
 - Mục tiêu xử lý hồ sơ ~40–70 trang; `within_60s` đo theo từng request.
