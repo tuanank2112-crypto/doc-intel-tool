@@ -123,7 +123,10 @@ async def _map_chunk(
 ) -> dict[str, Any]:
     async with sem:
         # Full chunk text — không cắt giữa (chunk đã chia theo char budget)
+        from .sanitize import sanitize_for_prompt, with_injection_guard
+
         body = chunk.get("text") or ""
+        wrapped, _meta = sanitize_for_prompt(body, tag="TAI_LIEU")
         user = (
             f"Phân tích đoạn tài liệu họp/thẩm định — phần {idx + 1}/{total}.\n"
             f"Tệp: {chunk.get('source_file')}\n"
@@ -132,10 +135,12 @@ async def _map_chunk(
             f"(có thể là thuật ngữ kỹ thuật, pháp lý, khoa học, hành chính). "
             f"Nếu tài liệu bằng tiếng Anh, dịch thuật ngữ sang tiếng Việt trong phần explanation.\n"
             f"Chú ý thêm: căn cứ, Điều/Khoản/Điểm, thẩm quyền, hiệu lực, trách nhiệm thi hành.\n\n"
-            f"{body}"
+            f"{wrapped}"
         )
         try:
-            data = await achat_json(MAP_SYSTEM, user, temperature=0.0, max_tokens=2200)
+            data = await achat_json(
+                with_injection_guard(MAP_SYSTEM), user, temperature=0.0, max_tokens=2200
+            )
         except Exception as e:
             return {
                 "error": str(e)[:200],

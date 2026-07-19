@@ -131,12 +131,10 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/")
-@app.get("/tro-ly-hop-ubnd-v2.html")
 def index() -> FileResponse:
-    for name in ("tro-ly-hop-ubnd-v2.html", "index.html"):
-        index_path = WEB / name
-        if index_path.exists():
-            return FileResponse(index_path)
+    index_path = WEB / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
     raise _public_error(404, "ui_not_found")
 
 
