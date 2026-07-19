@@ -84,10 +84,12 @@ app/                 # backend AI + API
 web/
   index.html         # UI
   api-bridge.js      # glue API ↔ UI
-  Emblem_*.webp, test.png
+  Emblem_of_Vietnam.svg.webp
+  test.png           # watermark trống đồng (login + sidebar) — tên file lịch sử, đang được dùng
 docs/
   ARCHITECTURE.md
   SECURITY.md
+evals/               # smoke/regression Q&A
 samples/             # PDF demo (không chứa dữ liệu thật)
 scripts/
 requirements.txt
@@ -96,17 +98,21 @@ requirements.txt
 
 ## Đánh giá (Evals)
 
-Smoke / regression set **5–6 câu** bám `samples/de_an_mau_48trang.pdf` (golden labels — người kiểm định lại).  
+Smoke / regression set **6 câu** bám `samples/de_an_mau_48trang.pdf`  
+(**nhãn đã đối chiếu với text gốc của PDF**).  
 Sẽ mở rộng 50–100 câu khi có corpus thi. Kết quả có cột `answer_mode`; **không dùng điểm khi LLM off** làm điểm chính.
 
 ```bash
-cd repo && source .venv/bin/activate && python -m evals.run_eval
+cd docorum && source .venv/bin/activate && python -m evals.run_eval
 # khuyến nghị (tránh analyze lại, tiết kiệm quota):
 python -m evals.run_eval --job-id <JOB_ID_DA_ANALYZE>
 python -m evals.run_eval --threshold 0.6
 ```
 
 Metric: answer_match (ALL `expect_contains`) + `answer_partial` %, citation page/clause hit, citation verified; tổng kết Overall và **LLM-only subset**.
+
+Ví dụ 1 lần chạy smoke (`--job-id`, model Gemini; số liệu thay đổi theo model/quota):  
+**6/6 answer match**, citation hit ~67%, verified ~83%.
 
 ## Ghi chú
 
